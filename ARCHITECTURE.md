@@ -56,21 +56,48 @@ To ensure the business logic remains decoupled from specific Hyperliquid SDKs, w
 The core logic depends *only* on this contract:
 
 ```python
+# interfaces/IDataSource.py
+
+from abc import ABC, abstractmethod
+from typing import List
+from decimal import Decimal
+from entities.trade import TradeObject
+
 class IDataSource(ABC):
     @abstractmethod
-    def get_trades(self, user, coin, start_time, end_time) -> List[TradeObject]:
-        """Returns normalized objects: {timestamp, side, size, price, fee, builder_id}"""
+    def get_trades(self, user: str, coin: str, start_time: int, end_time: int) -> List[TradeObject]:
+        """Returns normalized objects: {timestamp, side, size, price, fee, builder_id, closed_pnl}"""
         pass
 
     @abstractmethod
-    def get_active_users(self, coin, start_time) -> List[Address]:
+    def get_active_users(self, coin: str, start_time: int) -> List[str]:
         """Discover users active in a specific window"""
         pass
 
     @abstractmethod
-    def get_historical_equity(self, user, timestamp) -> Decimal:
+    def get_historical_equity(self, user: str, timestamp: int) -> Decimal:
         """Returns account value for ROE normalization"""
         pass
+
+# entities/trade.py
+
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class TradeObject:
+    timestamp: int
+    side: str         # "Long" or "Short"
+    size: float
+    price: float
+    fee: float
+    builder_id: Optional[str] = None
+    closed_pnl: float = 0.0
+
+# __init__.py files (empty):
+
+# interfaces/__init__.py
+# entities/__init__.py
 ```
 
 ### Dependency Injection
@@ -96,7 +123,31 @@ The transformer processes trades to calculate the Weighted Average Entry Price a
 ### Pseudocode
 
 ```python
-def process_trade(current_state, trade):
+# src/core/entities/position.py
+
+from dataclasses import dataclass
+
+@dataclass
+class PositionState:
+    net_size: float
+    avg_entry_px: float
+    is_tainted: bool
+    timestamp: int
+
+# src/core/use_cases/position_reconstructor.py
+
+from ..entities.position import PositionState
+from ..entities.trade import TradeObject
+
+def signs_match(a: float, b: float) -> bool:
+    # Returns True if a and b have the same nonzero sign
+    return (a > 0 and b > 0) or (a < 0 and b < 0)
+
+def check_taint(current_state: PositionState, trade: TradeObject) -> bool:
+    # Stub: always return False for now
+    return False
+
+def process_trade(current_state: PositionState, trade: TradeObject) -> PositionState:
     # 1. Determine Signed Sizes
     prev_sz = current_state.net_size
     trade_sz = trade.size if trade.side == "Long" else -trade.size
@@ -111,22 +162,27 @@ def process_trade(current_state, trade):
         new_avg_px = trade.price
     elif signs_match(prev_sz, trade_sz):
         # Increasing: Weighted Average
-        total_cost = (abs(prev_sz) * current_state.avg_px) + (abs(trade_sz) * trade.price)
+        total_cost = (abs(prev_sz) * current_state.avg_entry_px) + (abs(trade_sz) * trade.price)
         new_avg_px = total_cost / abs(new_sz)
     elif abs(trade_sz) > abs(prev_sz):
         # Flipping: Price resets to current trade price
-        new_avg_px = trade.price 
+        new_avg_px = trade.price
         # Note: Taint logic might reset here depending on the specific flip
     else:
         # Reducing: Price stays constant
-        new_avg_px = current_state.avg_px
+        new_avg_px = current_state.avg_entry_px
 
     # 4. Handle Zero Reset
     if new_sz == 0:
         new_avg_px = 0
         is_tainted = False
 
-    return PositionState(new_sz, new_avg_px, is_tainted)
+    return PositionState(
+        net_size=new_sz,
+        avg_entry_px=new_avg_px,
+        is_tainted=is_tainted,
+        timestamp=trade.timestamp
+    )
 ```
 
 ---
@@ -230,29 +286,43 @@ We use PostgreSQL (optionally with TimescaleDB) to balance write-heavy ingestion
 
 ## 7. Project Folder Structure
 
-Adopting "Clean Architecture" to separate the Data Layer (Outer) from the Business Logic (Inner).
+Below is the exact folder structure as specified above. 
+Empty `__init__.py` files are included to ensure proper Python package structure.
 
-```text
-/src
-  /core
-     /entities           # Trade, Position, User models
-     /use_cases          # ReconstructPosition, CalculateROE (Logic)
-     /interfaces         # IDataSource (Abstract Base Class)
-
-  /infrastructure
-     /gateways
-        hl_public_api.py # Hyperliquid Implementation
-        insilico_api.py  # Insilico Implementation
-        local_mock.py    # Testing
-     /persistence
-        postgres_repo.py # Saves snapshots to DB
-        redis_cache.py   # Hot state
-
-  /workers
-     ingestor.py         # Polls API -> Pushes to Queue
-     transformer.py      # Pulls Queue -> Runs Logic -> Saves to DB
-
-  /api
-     main.py             # Entry Point (Dependency Injection)
-     routes.py           # /trades, /leaderboard endpoints
 ```
+/src/
+  __init__.py
+
+  /core/
+    __init__.py
+    /entities/
+      __init__.py
+    /use_cases/
+      __init__.py
+    /interfaces/
+      __init__.py
+
+  /infrastructure/
+    __init__.py
+    /gateways/
+      __init__.py
+      hl_public_api.py
+      insilico_api.py
+      local_mock.py
+    /persistence/
+      __init__.py
+      postgres_repo.py
+      redis_cache.py
+
+  /workers/
+    __init__.py
+    ingestor.py
+    transformer.py
+
+  /api/
+    __init__.py
+    main.py
+    routes.py
+```
+
+_Note: You should create these folders and files in your project root. All `__init__.py` files can be empty. Implementation files (e.g. `hl_public_api.py`, `main.py`) should be created as empty files if you are scaffolding the project directory structure._
