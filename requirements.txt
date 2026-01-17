@@ -1,0 +1,30 @@
+# TradeTrace - Production FastAPI + PostgreSQL + Redis
+# Generated for hackathon reproducibility (Daniel excellence)
+# Run: pip install -r requirements.txt
+
+# Core API Framework (pinned for stability)
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Database (SQLAlchemy + PostgreSQL)
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Redis Cache (leaderboard performance)
+redis==5.0.1
+
+# Data Validation & Types
+pydantic==2.5.0
+python-multipart==0.0.6
+typing-extensions==4.8.0
+
+# HTTP Client (Hyperliquid API calls)
+httpx==0.25.2
+
+# Async Support
+aiohttp==3.9.1
+
+# Development (remove for production)
+pytest==7.4.3
+httpx==0.25.2  # Test client
