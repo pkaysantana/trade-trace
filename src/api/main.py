@@ -207,3 +207,212 @@ async def sync_data(
             logger.error(f"Failed to persist for {user}: {e}")
             
     return {"status": "success", "stats": stats}
+
+
+# =============================================================================
+# BONUS ENDPOINTS - Hyperliquid Challenge High-Impact Features
+# =============================================================================
+
+@app.get("/v1/deposits", response_model=DepositsAggregateResponse)
+async def get_deposits(
+    user: str = Query(..., description="User wallet address"),
+    fromMs: Optional[int] = Query(None, description="Start timestamp (ms)"),
+    toMs: Optional[int] = Query(None, description="End timestamp (ms)"),
+    gateway: HLPublicGateway = Depends(get_datasource)
+):
+    """
+    BONUS: Fetch user deposit/withdrawal history.
+    Enables fair competition filtering by tracking capital inflows during comp period.
+    """
+    deposits = await gateway.get_user_deposits(user, fromMs, toMs)
+    
+    total_deposits = sum(d.amount for d in deposits if d.amount > 0)
+    total_withdrawals = abs(sum(d.amount for d in deposits if d.amount < 0))
+    deposit_count = sum(1 for d in deposits if d.amount > 0)
+    withdrawal_count = sum(1 for d in deposits if d.amount < 0)
+    
+    return DepositsAggregateResponse(
+        total_deposits=total_deposits,
+        total_withdrawals=total_withdrawals,
+        net_transfers=total_deposits - total_withdrawals,
+        deposit_count=deposit_count,
+        withdrawal_count=withdrawal_count,
+        deposits=deposits
+    )
+
+
+@app.get("/v1/pnl")
+async def get_pnl(
+    user: str = Query(..., description="User wallet address"),
+    coin: Optional[str] = Query(None, description="Coin symbol or 'portfolio' for all"),
+    gateway: HLPublicGateway = Depends(get_datasource)
+):
+    """
+    BONUS: Calculate PnL for single coin or entire portfolio.
+    Use coin=portfolio or omit coin for portfolio-level aggregation.
+    """
+    # Portfolio mode: aggregate across multiple coins
+    if coin is None or coin.lower() == "portfolio":
+        coins = ["BTC", "ETH", "SOL", "DOGE", "ARB"]  # Top coins
+        results = {}
+        total_realized = 0.0
+        total_unrealized = 0.0
+        total_fees = 0.0
+        
+        for c in coins:
+            try:
+                trades = await gateway.get_trades(user, c)
+                if not trades:
+                    continue
+                
+                realized = sum(t.closed_pnl for t in trades)
+                fees = sum(t.fee for t in trades)
+                
+                # Get current unrealized PnL
+                current_pos = await gateway.get_current_position(user, c)
+                unrealized = current_pos.get("unrealizedPnl", 0) if current_pos else 0
+                
+                results[c] = {
+                    "realized_pnl": realized,
+                    "unrealized_pnl": unrealized,
+                    "fees": fees,
+                    "net_pnl": realized - fees + unrealized,
+                    "trade_count": len(trades)
+                }
+                
+                total_realized += realized
+                total_unrealized += unrealized
+                total_fees += fees
+                
+            except Exception as e:
+                logger.warning(f"Failed to get PnL for {c}: {e}")
+                continue
+        
+        return PortfolioPnLResponse(
+            user=user,
+            total_realized_pnl=total_realized,
+            total_unrealized_pnl=total_unrealized,
+            total_fees=total_fees,
+            net_pnl=total_realized - total_fees + total_unrealized,
+            coins=results
+        )
+    
+    # Single coin mode
+    trades = await gateway.get_trades(user, coin)
+    if not trades:
+        return {"user": user, "coin": coin, "realized_pnl": 0, "fees": 0, "net_pnl": 0}
+    
+    realized = sum(t.closed_pnl for t in trades)
+    fees = sum(t.fee for t in trades)
+    
+    current_pos = await gateway.get_current_position(user, coin)
+    unrealized = current_pos.get("unrealizedPnl", 0) if current_pos else 0
+    
+    return {
+        "user": user,
+        "coin": coin,
+        "realized_pnl": realized,
+        "unrealized_pnl": unrealized,
+        "fees": fees,
+        "net_pnl": realized - fees + unrealized,
+        "trade_count": len(trades)
+    }
+
+
+@app.get("/v1/positions/current")
+async def get_current_position(
+    user: str = Query(..., description="User wallet address"),
+    coin: str = Query(..., description="Coin symbol"),
+    gateway: HLPublicGateway = Depends(get_datasource)
+):
+    """
+    BONUS: Get current live position with risk metrics (liqPx, marginUsed%).
+    """
+    position = await gateway.get_current_position(user, coin)
+    
+    if not position:
+        return {"user": user, "coin": coin, "hasPosition": False}
+    
+    # Calculate margin used percentage
+    account_value = await gateway.get_account_value(user)
+    margin_used_pct = position.get("marginUsed", 0) / account_value if account_value > 0 else 0
+    
+    return {
+        "user": user,
+        "coin": coin,
+        "hasPosition": True,
+        "netSize": position["netSize"],
+        "entryPx": position["entryPx"],
+        "liqPx": position["liqPx"],
+        "unrealizedPnl": position["unrealizedPnl"],
+        "leverage": position["leverage"],
+        "marginUsedPct": round(margin_used_pct, 4)
+    }
+
+
+@app.get("/v1/leaderboard/fair")
+async def get_fair_leaderboard(
+    coin: str = Query(..., description="Token Symbol"),
+    metric: str = Query("pnl", description="'pnl' or 'roi'"),
+    fromMs: Optional[int] = Query(None, description="Competition start time"),
+    toMs: Optional[int] = Query(None, description="Competition end time"),
+    gateway: HLPublicGateway = Depends(get_datasource)
+):
+    """
+    BONUS: Deposit-adjusted leaderboard for fair competition.
+    Adjusts ROE calculation based on deposits during competition period.
+    """
+    users = await gateway.get_active_users(coin, 0)
+    entries = []
+    
+    for user in users:
+        try:
+            # Get trades
+            trades = await gateway.get_trades(user, coin, fromMs, toMs)
+            if not trades:
+                continue
+            
+            # Calculate PnL
+            realized_pnl = sum(t.closed_pnl for t in trades)
+            fees = sum(t.fee for t in trades)
+            net_pnl = realized_pnl - fees
+            
+            # Get deposits during period for fair scoring
+            deposits = await gateway.get_user_deposits(user, fromMs, toMs)
+            deposit_total = sum(d.amount for d in deposits if d.amount > 0)
+            
+            # Fair ROE: PnL / (starting_capital + mid-comp deposits)
+            starting_equity = await gateway.get_historical_equity(user, fromMs or 0)
+            effective_capital = starting_equity + deposit_total
+            fair_roi = (net_pnl / effective_capital) * 100 if effective_capital > 0 else 0
+            
+            # Check if user had deposits during comp (flag for transparency)
+            had_mid_comp_deposits = deposit_total > 0
+            
+            entries.append({
+                "rank": 0,
+                "user": user,
+                "pnl": net_pnl,
+                "roi": fair_roi,
+                "starting_equity": starting_equity,
+                "deposits_during_comp": deposit_total,
+                "effective_capital": effective_capital,
+                "had_mid_comp_deposits": had_mid_comp_deposits,
+                "trade_count": len(trades)
+            })
+            
+        except Exception as e:
+            logger.warning(f"Failed to process {user} for fair leaderboard: {e}")
+            continue
+    
+    # Sort by metric
+    if metric == "roi":
+        entries.sort(key=lambda x: x["roi"], reverse=True)
+    else:
+        entries.sort(key=lambda x: x["pnl"], reverse=True)
+    
+    # Assign ranks
+    for i, entry in enumerate(entries):
+        entry["rank"] = i + 1
+    
+    return entries
