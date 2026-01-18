@@ -8,17 +8,9 @@ Tests the high-impact bonus endpoints:
 - /v1/leaderboard/fair
 """
 import pytest
-from httpx import AsyncClient, ASGITransport
-from src.api.main import app
+from httpx import AsyncClient
 
 TEST_USER = "0x31ca8395cf837de08b24da3f660e77761dfb974b"
-
-
-@pytest.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
 
 
 @pytest.mark.asyncio
@@ -37,7 +29,7 @@ async def test_deposits_endpoint(client: AsyncClient):
     assert isinstance(data["deposits"], list)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_deposits_with_time_filter(client: AsyncClient):
     """Test /v1/deposits with time range filter."""
     resp = await client.get(
@@ -52,7 +44,7 @@ async def test_deposits_with_time_filter(client: AsyncClient):
         assert deposit["timestamp_ms"] <= 1710000000000
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_pnl_single_coin(client: AsyncClient):
     """Test /v1/pnl for single coin."""
     resp = await client.get(f"/v1/pnl?user={TEST_USER}&coin=BTC")
@@ -66,7 +58,7 @@ async def test_pnl_single_coin(client: AsyncClient):
     assert "net_pnl" in data
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_pnl_portfolio(client: AsyncClient):
     """Test /v1/pnl for portfolio aggregation."""
     resp = await client.get(f"/v1/pnl?user={TEST_USER}&coin=portfolio")
@@ -82,7 +74,7 @@ async def test_pnl_portfolio(client: AsyncClient):
     assert isinstance(data["coins"], dict)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_pnl_no_coin_defaults_to_portfolio(client: AsyncClient):
     """Test /v1/pnl without coin parameter defaults to portfolio."""
     resp = await client.get(f"/v1/pnl?user={TEST_USER}")
@@ -93,7 +85,7 @@ async def test_pnl_no_coin_defaults_to_portfolio(client: AsyncClient):
     assert "total_realized_pnl" in data
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_current_position(client: AsyncClient):
     """Test /v1/positions/current returns risk metrics."""
     resp = await client.get(f"/v1/positions/current?user={TEST_USER}&coin=BTC")
@@ -112,7 +104,7 @@ async def test_current_position(client: AsyncClient):
         assert "marginUsedPct" in data
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_fair_leaderboard(client: AsyncClient):
     """Test /v1/leaderboard/fair with deposit adjustment."""
     resp = await client.get("/v1/leaderboard/fair?coin=BTC")
@@ -133,7 +125,7 @@ async def test_fair_leaderboard(client: AsyncClient):
         assert "had_mid_comp_deposits" in entry
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_fair_leaderboard_with_time_range(client: AsyncClient):
     """Test /v1/leaderboard/fair with competition time range."""
     resp = await client.get(
@@ -143,7 +135,7 @@ async def test_fair_leaderboard_with_time_range(client: AsyncClient):
     assert isinstance(resp.json(), list)
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_fair_leaderboard_roi_sorting(client: AsyncClient):
     """Test /v1/leaderboard/fair sorts by ROI when requested."""
     resp = await client.get("/v1/leaderboard/fair?coin=BTC&metric=roi")
@@ -155,7 +147,7 @@ async def test_fair_leaderboard_roi_sorting(client: AsyncClient):
         assert data[0]["roi"] >= data[1]["roi"]
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_health_still_works(client: AsyncClient):
     """Verify health endpoint still works after bonus additions."""
     resp = await client.get("/health")
@@ -163,7 +155,7 @@ async def test_health_still_works(client: AsyncClient):
     assert resp.json()["status"] == "healthy"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_existing_endpoints_still_work(client: AsyncClient):
     """Verify existing endpoints weren't broken by bonus additions."""
     # Test trades

@@ -1,0 +1,27 @@
+# Render deployment configuration
+services:
+  - type: web
+    name: tradetrace-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradetrace-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: tradetrace-redis
+          property: connectionString
+
+databases:
+  - name: tradetrace-db
+    databaseName: tradetrace
+    user: tradetrace
+
+services:
+  - type: redis
+    name: tradetrace-redis
+    maxmemoryPolicy: allkeys-lru
