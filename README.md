@@ -21,6 +21,14 @@
 - **Live Risk Metrics** (`/v1/positions/current`) - liqPx, marginUsed%
 - **Fair Leaderboard** (`/v1/leaderboard/fair`) - Deposit-adjusted scoring
 
+### Production Features (v1.2.0) ⚡
+- **Rate Limiting** - 60 requests/minute per IP
+- **Request Logging** - All requests logged with timing
+- **API Statistics** (`/v1/stats`) - Uptime, request counts
+- **Demo Helper** (`/v1/demo`) - Sample wallets and quick test links
+- **Error Handling** - Clean JSON error responses
+- **Swagger Tags** - Organized API documentation
+
 ---
 
 ## 🏗️ Architecture
@@ -88,6 +96,8 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs) for interactive Sw
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check |
+| `/v1/stats` | GET | API statistics (uptime, requests) |
+| `/v1/demo` | GET | Demo helper with sample wallets |
 | `/v1/trades` | GET | Raw trade fills |
 | `/v1/positions/history` | GET | Reconstructed position snapshots |
 | `/v1/positions/current` | GET | Live position with risk metrics |
@@ -135,26 +145,24 @@ pytest tests/ -v
 
 ## 🌐 Deployment
 
-### Option 1: Railway (Recommended)
+### Local Demo (Recommended)
 ```bash
-# Install Railway CLI
-npm install -g @railway/cli
+# Start all services with Docker Compose
+docker-compose up --build -d
 
-# Deploy
-railway login
-railway init
-railway up
+# Verify API is running
+curl http://localhost:8000/health
+
+# View Swagger docs
+open http://localhost:8000/docs
 ```
 
-### Option 2: Render
-1. Connect GitHub repo to [render.com](https://render.com)
-2. Create Web Service from `Dockerfile`
-3. Add PostgreSQL and Redis add-ons
+### Cloud Deployment (Optional)
+Cloud deployment via Railway/Render is supported but requires:
+- DATABASE_URL environment variable (Neon PostgreSQL ready)
+- REDIS_URL for caching (optional)
 
-### Option 3: DigitalOcean App Platform
-```bash
-doctl apps create --spec .do/app.yaml
-```
+See `railway.json` and `render.yaml` for configuration templates.
 
 ---
 
@@ -170,6 +178,29 @@ CREATE TABLE positionsnapshots (
     "user" VARCHAR,
     coin VARCHAR,
     lifecycleId BIGINT
+);
+
+-- Trades table (v1.2.0)
+CREATE TABLE trades (
+    time_ms BIGINT,
+    coin VARCHAR,
+    side VARCHAR,
+    sz DECIMAL,
+    px DECIMAL,
+    fee DECIMAL,
+    closed_pnl DECIMAL,
+    builder_id VARCHAR,
+    hash VARCHAR,
+    "user" VARCHAR
+);
+
+-- Deposits table (v1.2.0)
+CREATE TABLE deposits (
+    timestamp_ms BIGINT,
+    asset VARCHAR,
+    amount DECIMAL,
+    tx_hash VARCHAR,
+    "user" VARCHAR
 );
 ```
 
@@ -194,7 +225,17 @@ CREATE TABLE positionsnapshots (
 
 ## 📝 Changelog
 
-### v1.1.0 (Current)
+### v1.2.0 (Current)
+- Added rate limiting (60 req/min)
+- Added request logging with timing
+- Added `/v1/stats` endpoint
+- Added `/v1/demo` endpoint with sample wallets
+- Added OpenAPI tags for organized Swagger docs
+- Added global error handling
+- Added trades and deposits tables to persistence
+- Added Redis caching for leaderboard (60s TTL)
+
+### v1.1.0
 - Added `/v1/deposits` endpoint
 - Added `/v1/pnl` with portfolio aggregation
 - Added `/v1/positions/current` with liqPx, marginUsed%

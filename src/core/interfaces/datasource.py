@@ -20,3 +20,15 @@ class IDataSource(ABC):
     @abstractmethod
     async def get_historical_equity(self, user: str, timestamp: int) -> float:
         pass
+
+    @abstractmethod
+    async def get_user_deposits(
+        self, 
+        user: str, 
+        from_ms: Optional[int] = None, 
+        to_ms: Optional[int] = None
+    ) -> List[dict]:
+        """
+        Returns list of DepositResponse objects (as dicts or objects).
+        """
+        pass

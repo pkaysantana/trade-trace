@@ -4,6 +4,7 @@ from typing import List, Optional
 from src.core.interfaces.datasource import IDataSource
 from src.core.entities.trade import TradeResponse
 from src.core.entities.position import PositionResponse
+from src.core.entities.deposit import DepositResponse
 
 class PostgresRepo(IDataSource):
     def __init__(self, dsn: str):
@@ -42,6 +43,17 @@ class PostgresRepo(IDataSource):
                 "user" VARCHAR
             );
         """)
+
+        # Deposits Table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS deposits (
+                timestamp_ms BIGINT,
+                asset VARCHAR,
+                amount DECIMAL,
+                tx_hash VARCHAR,
+                "user" VARCHAR
+            );
+        """)
         
         conn.commit()
         cur.close()
@@ -77,6 +89,25 @@ class PostgresRepo(IDataSource):
         
         insert_query = """
             INSERT INTO trades (time_ms, coin, side, sz, px, fee, closed_pnl, builder_id, hash, "user")
+            VALUES %s
+        """
+        
+        execute_values(cur, insert_query, data)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def bulk_insert_deposits(self, deposits: List[DepositResponse], user: str):
+        conn = psycopg2.connect(self.dsn)
+        cur = conn.cursor()
+        
+        data = [
+            (d.timestamp_ms, d.asset, d.amount, d.tx_hash, user)
+            for d in deposits
+        ]
+        
+        insert_query = """
+            INSERT INTO deposits (timestamp_ms, asset, amount, tx_hash, "user")
             VALUES %s
         """
         
@@ -140,6 +171,45 @@ class PostgresRepo(IDataSource):
         cur.close()
         conn.close()
         return users
+
+    async def get_user_deposits(
+        self, 
+        user: str, 
+        from_ms: Optional[int] = None, 
+        to_ms: Optional[int] = None
+    ) -> List[DepositResponse]:
+        conn = psycopg2.connect(self.dsn)
+        cur = conn.cursor()
+        
+        query = """
+            SELECT timestamp_ms, asset, amount, tx_hash
+            FROM deposits
+            WHERE "user" = %s
+        """
+        params = [user]
+        
+        if from_ms:
+            query += " AND timestamp_ms >= %s"
+            params.append(from_ms)
+        if to_ms:
+            query += " AND timestamp_ms <= %s"
+            params.append(to_ms)
+            
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        
+        deposits = []
+        for row in rows:
+            deposits.append(DepositResponse(
+                timestamp_ms=row[0],
+                asset=row[1],
+                amount=float(row[2]),
+                tx_hash=row[3]
+            ))
+            
+        cur.close()
+        conn.close()
+        return deposits
 
     async def get_historical_equity(self, user: str, timestamp: int) -> float:
         # Complex to reconstruct exact equity from just trades + initial. 
