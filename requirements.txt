@@ -21,6 +21,7 @@ typing-extensions==4.8.0
 
 # HTTP Client (Hyperliquid API calls)
 httpx==0.25.2
+hyperliquid-python-sdk==0.10.0
 
 # Async Support
 aiohttp==3.9.1

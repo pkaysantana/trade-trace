@@ -8,15 +8,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.interfaces.datasource import IDataSource
 from src.infrastructure.gateways.hl_public_api import HLPublicGateway
 from src.core.entities.trade import TradeResponse
-from src.core.entities.position import PositionResponse
+from src.core.entities.position import PositionResponse, PortfolioPnLResponse
 from src.core.entities.leaderboard import LeaderboardEntry, PnLResponse
+from src.core.entities.deposit import DepositResponse, DepositsAggregateResponse
 from src.core.use_cases.position_reconstructor import PositionReconstructor
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TradeTrace")
 
-app = FastAPI(title="TradeTrace API", version="1.0.3")
+app = FastAPI(title="TradeTrace API", version="1.1.0", description="Position reconstruction & leaderboard API with bonus features")
 
 app.add_middleware(
     CORSMiddleware,

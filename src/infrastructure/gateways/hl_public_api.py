@@ -141,3 +141,123 @@ class HLPublicGateway(IDataSource):
         """
         # In a real implementation, you might snapshot 'clearinghouseState' daily
         return 1000.0
+
+    async def get_user_deposits(
+        self, 
+        user: str, 
+        from_ms: Optional[int] = None, 
+        to_ms: Optional[int] = None
+    ) -> List[dict]:
+        """
+        Fetches user deposit/withdrawal history using userNonFundingLedgerUpdates.
+        This enables fair competition filtering by tracking capital inflows.
+        """
+        from src.core.entities.deposit import DepositResponse
+        
+        payload = {
+            "type": "userNonFundingLedgerUpdates",
+            "user": user
+        }
+        
+        try:
+            raw_updates = await asyncio.to_thread(self.info.post, "/info", payload)
+            
+            deposits = []
+            for update in raw_updates:
+                try:
+                    # Filter for deposit/withdrawal types
+                    delta = update.get("delta", {})
+                    update_type = delta.get("type", "")
+                    
+                    # Include deposits, withdrawals, and transfers
+                    if update_type in ["deposit", "withdraw", "internalTransfer"]:
+                        timestamp = update.get("time", 0)
+                        
+                        # Apply time filters
+                        if from_ms and timestamp < from_ms:
+                            continue
+                        if to_ms and timestamp > to_ms:
+                            continue
+                        
+                        amount = float(delta.get("usdc", 0))
+                        if update_type == "withdraw":
+                            amount = -abs(amount)  # Withdrawals are negative
+                        
+                        deposits.append(DepositResponse(
+                            timestamp_ms=timestamp,
+                            asset="USDC",
+                            amount=amount,
+                            tx_hash=delta.get("hash")
+                        ))
+                except Exception as e:
+                    logger.warning(f"Skipping malformed deposit update: {e}")
+                    continue
+            
+            # Sort by timestamp
+            deposits.sort(key=lambda x: x.timestamp_ms)
+            return deposits
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch deposits for {user}: {e}")
+            return []
+
+    async def get_current_position(self, user: str, coin: str) -> Optional[dict]:
+        """
+        Fetches current open position for risk metrics (liqPx, marginUsed).
+        Uses clearinghouseState endpoint.
+        """
+        try:
+            state = await asyncio.to_thread(
+                self.info.post, "/info", 
+                {"type": "clearinghouseState", "user": user}
+            )
+            
+            # Find position for the specified coin
+            asset_positions = state.get("assetPositions", [])
+            for asset_pos in asset_positions:
+                pos = asset_pos.get("position", {})
+                if pos.get("coin") == coin:
+                    return {
+                        "netSize": float(pos.get("szi", 0)),
+                        "entryPx": float(pos.get("entryPx", 0)),
+                        "liqPx": float(pos.get("liquidationPx", 0)) if pos.get("liquidationPx") else None,
+                        "unrealizedPnl": float(pos.get("unrealizedPnl", 0)),
+                        "marginUsed": float(pos.get("marginUsed", 0)),
+                        "leverage": float(pos.get("leverage", {}).get("value", 1))
+                    }
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch position for {user}/{coin}: {e}")
+            return None
+
+    async def get_account_value(self, user: str) -> float:
+        """
+        Fetches current account value for margin calculations.
+        """
+        try:
+            state = await asyncio.to_thread(
+                self.info.post, "/info",
+                {"type": "clearinghouseState", "user": user}
+            )
+            
+            margin_summary = state.get("marginSummary", {})
+            return float(margin_summary.get("accountValue", 1000))
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch account value for {user}: {e}")
+            return 1000.0
+
+    async def get_mid_price(self, coin: str) -> float:
+        """
+        Fetches current mid price for a coin.
+        """
+        try:
+            mids = await asyncio.to_thread(
+                self.info.post, "/info",
+                {"type": "allMids"}
+            )
+            return float(mids.get(coin, 0))
+        except Exception as e:
+            logger.error(f"Failed to fetch mid price for {coin}: {e}")
+            return 0.0
