@@ -1,8 +1,10 @@
-from dataclasses import dataclass
+from pydantic import BaseModel
+from typing import Optional
 
-@dataclass
-class PositionState:
-    net_size: float
-    avg_entry_px: float
-    is_tainted: bool
-    timestamp: int
+class PositionResponse(BaseModel):
+    timeMs: int
+    netSize: float
+    avgEntryPx: float
+    tainted: bool = False
+    lifecycleId: Optional[int] = None
+
